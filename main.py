@@ -1,43 +1,65 @@
-import csv
 from datetime import datetime
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+import requests
+from bs4 import BeautifulSoup
 
 
-def scrape_and_save_companies():
-    driver = webdriver.Chrome()
-    driver.get("https://www.distributorcentral.com/p/supplier-list")
+def scrape_and_save_data():
+    url = "https://www.distributorcentral.com/p/supplier-list"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
 
-    # Wait for company elements to load
-    wait = WebDriverWait(driver, 10)
-    companies = wait.until(
-        EC.presence_of_all_elements_located(
-            (By.CSS_SELECTOR, ".supplier-list-item .supplier-name")
-        )
-    )
+    try:
+        print("Accessing website...")
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
 
-    # Extract company names
-    company_names = [company.text for company in companies]
+        print("Parsing webpage content...")
+        soup = BeautifulSoup(response.content, "html.parser")
 
-    driver.quit()
+        p_tags = soup.find_all("p")
+        processed_data = []
 
-    # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"distributor_companies_{timestamp}.csv"
+        for p in p_tags:
+            # First, replace <br> tags with a special marker
+            for br in p.find_all("br"):
+                br.replace_with("|BREAK|")
 
-    # Save to CSV
-    with open(filename, "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["Company Name"])  # Header
-        writer.writerows([[name] for name in company_names])
+            text = p.text
+            if text and len(text.strip()) > 1:
+                # Split by our marker and process each part
+                parts = text[1:].split("|BREAK|")
+                parts = [part.strip() for part in parts if part.strip()]
+                if parts:
+                    processed_data.extend(parts)
+            elif text:
+                processed_data.append(text.strip())
 
-    return filename, len(company_names)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"supplier_data_{timestamp}.csv"
+
+        # Create single-row CSV with all data
+        with open(filename, "w", encoding="utf-8") as file:
+            single_row = ",".join(processed_data)
+            file.write(single_row)
+
+        return filename, len(processed_data)
+
+    except requests.RequestException as e:
+        print(f"Error accessing the website: {str(e)}")
+        return None, 0
+    except Exception as e:
+        print(f"An unexpected error occurred: {str(e)}")
+        return None, 0
 
 
 if __name__ == "__main__":
-    filename, count = scrape_and_save_companies()
-    print(f"Successfully scraped {count} companies")
-    print(f"Data saved to: {filename}")
+    output_file, count = scrape_and_save_data()
+    if output_file:
+        print(f"Successfully scraped {count} items")
+        print(f"Data saved to: {output_file}")
+    else:
+        print(
+            "Scraping failed. Please check the website structure or your internet connection."
+        )
